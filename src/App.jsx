@@ -18,14 +18,14 @@ const loadScript = (src) => {
 
 export default function App() {
   const [scriptsLoaded, setScriptsLoaded] = useState(false);
-  const [url, setUrl] = useState('https://docs.google.com/spreadsheets/d/18TqnvZDTxSILCh2GijsZPKs0zczKhRvi1s5YmFE9Reo/edit?gid=0#gid=0');
+  const [url, setUrl] = useState('https://docs.google.com/spreadsheets/d/1lrsse1AMRXT71n3zj4BC9xczgx1POSAeMFLTScFB7N4/edit?gid=119633731#gid=119633731');
   const [addresses, setAddresses] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   
   // PDF Settings
-  const [pageSize, setPageSize] = useState('letter');
+  const [pageSize, setPageSize] = useState('5x7-landscape');
   const [align, setAlign] = useState('center');
   const [fonts, setFonts] = useState({ pinyon: null, alice: null });
 
@@ -82,15 +82,67 @@ export default function App() {
 
   const processCSVData = (csvText) => {
     window.Papa.parse(csvText, {
+      header: true,
+      skipEmptyLines: true,
       complete: (results) => {
         const data = results.data;
-        // Column D is index 3 (0:A, 1:B, 2:C, 3:D)
         const extractedAddresses = data
-          .map(row => row[3])
-          .filter(address => address && address.trim() !== ''); // Remove empty cells
-        
+          .map(row => {
+            const toTitleCase = (str) => {
+              if (!str) return '';
+              return str.toLowerCase().replace(/\b\w/g, s => s.toUpperCase());
+            };
+
+            const firstName = (row['shipping first name'] || '').trim();
+            const lastName = (row['shipping last name'] || '').trim();
+            const nameLine = `${firstName} ${lastName}`.trim();
+            
+            const addr1 = toTitleCase((row['shipping address1'] || '').trim());
+            const addr2 = toTitleCase((row['shipping address2'] || '').trim());
+            const city = toTitleCase((row['shipping city'] || '').trim());
+            const state = (row['shipping province code'] || row['shipping province'] || '').trim().toUpperCase();
+            const zip = (row['shipping zip'] || '').trim();
+            let country = (row['shipping country'] || '').trim();
+            const isUS = !country || ['US', 'USA', 'UNITED STATES', 'UNITED STATES OF AMERICA'].includes(country.toUpperCase());
+
+            if (!isUS) {
+                country = country.toUpperCase();
+            } else {
+                country = '';
+            }
+            
+            // Skip rows completely empty of both name and address lines
+            if (!nameLine && !addr1 && !city) return null;
+            
+            let addressString = nameLine;
+            if (addr1) addressString += `\n${addr1}`;
+            if (addr2) addressString += `\n${addr2}`;
+            
+            let cityStateZip = '';
+            if (!isUS) {
+                // International format: Zip City (drop state)
+                if (zip) cityStateZip += zip;
+                if (city) cityStateZip += (cityStateZip ? ' ' : '') + city;
+            } else {
+                // US format: City State Zip
+                if (city) cityStateZip += city;
+                if (state) cityStateZip += (cityStateZip ? ' ' : '') + state;
+                if (zip) cityStateZip += (cityStateZip ? ' ' : '') + zip;
+            }
+            cityStateZip = cityStateZip.trim();
+
+            if (cityStateZip) {
+               addressString += `\n${cityStateZip}`;
+            }
+            if (country) {
+               addressString += `\n${country}`;
+            }
+            return addressString;
+          })
+          .filter(address => address !== null);
+          
         if (extractedAddresses.length === 0) {
-          setError('No addresses found in Column D. Please verify the spreadsheet format.');
+          setError('No valid shipping addresses found. Please verify your CSV has columns like "shipping first name", "shipping address1", etc.');
         } else {
           setAddresses(extractedAddresses);
           setSuccess(`Successfully imported ${extractedAddresses.length} addresses!`);
@@ -212,20 +264,29 @@ export default function App() {
         const ptToMm = 0.352778; // 1 point is exactly 0.352778 mm
 
         // Draw Return Address (Top Left)
-        const returnAddress = [
-          "Aishwarya Kapa",
+        const returnName = "Aishwarya Kapa";
+        const returnAddressLines = [
           "7052 Santa Teresa Blvd #1052",
           "San Jose CA 95139"
         ];
         
-        doc.setFont('Alice', 'normal');
-        doc.setFontSize(12);
-        
-        const returnLineHeight = 12 * ptToMm * 0.9; // 12pt with 0.9 spacing
         let returnY = 6.35; // 0.25 inch from top margin
         const returnX = 6.35; // 0.25 inch from left margin
         
-        returnAddress.forEach(line => {
+        // Draw Return Name
+        doc.setFont('Pinyon', 'normal');
+        doc.setFontSize(20);
+        doc.text(returnName, returnX, returnY, { align: 'left', baseline: 'top' });
+        
+        // Advance Y with extra spacing so the cursive loops do not touch the next line
+        returnY += (20 * ptToMm * 1.25);
+        
+        // Draw Remaining Return Address
+        doc.setFont('Alice', 'normal');
+        doc.setFontSize(12);
+        const returnLineHeight = 12 * ptToMm * 0.9; // 12pt with 0.9 spacing
+        
+        returnAddressLines.forEach(line => {
           doc.text(line, returnX, returnY, { align: 'left', baseline: 'top' });
           returnY += returnLineHeight;
         });
@@ -290,8 +351,18 @@ export default function App() {
             }
         });
 
-        // Determine starting Y to center the block vertically
-        let currentY = (pageHeight / 2) - (totalHeight / 2);
+        // Determine starting Y to center ONLY the receiver name vertically
+        let nameBlockHeight = 0;
+        linesToDraw.forEach((line, idx) => {
+            if (line.font === 'Pinyon') {
+                nameBlockHeight += line.height;
+                if (idx < linesToDraw.length - 1 && linesToDraw[idx+1].font === 'Pinyon') {
+                    nameBlockHeight += lineSpacingMm;
+                }
+            }
+        });
+        
+        let currentY = (pageHeight / 2) - (nameBlockHeight / 2);
 
         // Draw Lines
         linesToDraw.forEach((line, idx) => {
@@ -341,7 +412,7 @@ export default function App() {
       const pdf = await window.pdfjsLib.getDocument({ data: pdfData }).promise;
       
       const numPages = pdf.numPages;
-      const maxPages = Math.min(numPages, 10); // Limit to 10 pages for performance
+      const maxPages = numPages; // Show all pages as requested
       const images = [];
 
       for (let i = 1; i <= maxPages; i++) {
