@@ -16,16 +16,92 @@ const loadScript = (src) => {
   });
 };
 
+const stateMap = {
+  'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR', 'california': 'CA',
+  'colorado': 'CO', 'connecticut': 'CT', 'delaware': 'DE', 'florida': 'FL', 'georgia': 'GA',
+  'hawaii': 'HI', 'idaho': 'ID', 'illinois': 'IL', 'indiana': 'IN', 'iowa': 'IA',
+  'kansas': 'KS', 'kentucky': 'KY', 'louisiana': 'LA', 'maine': 'ME', 'maryland': 'MD',
+  'massachusetts': 'MA', 'michigan': 'MI', 'minnesota': 'MN', 'mississippi': 'MS', 'missouri': 'MO',
+  'montana': 'MT', 'nebraska': 'NE', 'nevada': 'NV', 'new hampshire': 'NH', 'new jersey': 'NJ',
+  'new mexico': 'NM', 'new york': 'NY', 'north carolina': 'NC', 'north dakota': 'ND', 'ohio': 'OH',
+  'oklahoma': 'OK', 'oregon': 'OR', 'pennsylvania': 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
+  'south dakota': 'SD', 'tennessee': 'TN', 'texas': 'TX', 'utah': 'UT', 'vermont': 'VT',
+  'virginia': 'VA', 'washington': 'WA', 'west virginia': 'WV', 'wisconsin': 'WI', 'wyoming': 'WY',
+  'district of columbia': 'DC', 'puerto rico': 'PR',
+  'alberta': 'AB', 'british columbia': 'BC', 'manitoba': 'MB', 'new brunswick': 'NB',
+  'newfoundland and labrador': 'NL', 'nova scotia': 'NS', 'ontario': 'ON', 'prince edward island': 'PE',
+  'quebec': 'QC', 'saskatchewan': 'SK', 'northwest territories': 'NT', 'nunavut': 'NU', 'yukon': 'YT'
+};
+
+const getShortProvince = (prov) => {
+  if (!prov) return '';
+  const lower = prov.trim().toLowerCase();
+  if (stateMap[lower]) return stateMap[lower];
+  return prov.trim().toUpperCase();
+};
+
+const toTitleCase = (str) => {
+  if (!str) return '';
+  return str.toLowerCase().replace(/\b\w/g, s => s.toUpperCase());
+};
+
+const formatAddressStr = (str, preserveState = false) => {
+  if (!str) return '';
+  
+  let formatted = str.toLowerCase().replace(/\b\w/g, s => s.toUpperCase());
+  
+  const abbreviations = {
+    'court': 'Ct',
+    'street': 'St',
+    'avenue': 'Ave',
+    'boulevard': 'Blvd',
+    'drive': 'Dr',
+    'road': 'Rd',
+    'lane': 'Ln'
+  };
+
+  Object.entries(abbreviations).forEach(([word, abbr]) => {
+    formatted = formatted.replace(new RegExp(`\\b${word}\\b`, 'gi'), abbr);
+  });
+
+  if (preserveState) {
+    const words = formatted.split(' ');
+    formatted = words.map((word, index) => {
+      const cleanWord = word.replace(/[^a-zA-Z]/g, '');
+      
+      // If it's a 2-letter word that matches a state code (like CT, CA, NY)
+      if (cleanWord.length === 2 && Object.values(stateMap).includes(cleanWord.toUpperCase())) {
+        const nextWord = words[index + 1];
+        const prevWord = index > 0 ? words[index - 1] : null;
+        
+        // Context-aware checks to ensure it's actually a State and not an address abbreviation like 'Ct' (Court)
+        const isFollowedByZip = nextWord && /^\d{5}(?:-\d{4})?$/.test(nextWord.replace(/[^0-9-]/g, ''));
+        const isPrecededByComma = prevWord && prevWord.endsWith(',');
+        const isStandAlone = words.length <= 2;
+        const isLast = index === words.length - 1;
+        const startsWithNumber = /^\d/.test(words[0]);
+        
+        if (isFollowedByZip || isPrecededByComma || isStandAlone || (isLast && !startsWithNumber)) {
+          return word.toUpperCase();
+        }
+      }
+      return word;
+    }).join(' ');
+  }
+  
+  return formatted;
+};
+
 export default function App() {
   const [scriptsLoaded, setScriptsLoaded] = useState(false);
-  const [url, setUrl] = useState('https://docs.google.com/spreadsheets/d/1lrsse1AMRXT71n3zj4BC9xczgx1POSAeMFLTScFB7N4/edit?gid=119633731#gid=119633731');
+  const [url, setUrl] = useState('https://docs.google.com/spreadsheets/d/18TqnvZDTxSILCh2GijsZPKs0zczKhRvi1s5YmFE9Reo/edit?gid=0#gid=0');
   const [addresses, setAddresses] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   
   // PDF Settings
-  const [pageSize, setPageSize] = useState('5x7-landscape');
+  const [pageSize, setPageSize] = useState('letter');
   const [align, setAlign] = useState('center');
   const [fonts, setFonts] = useState({ pinyon: null, alice: null });
 
@@ -54,7 +130,6 @@ export default function App() {
           loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
         ]);
         
-        // Fetch custom fonts as base64 from jsdelivr github proxy
         const [pinyonB64, aliceB64] = await Promise.all([
           fetchFontAsBase64('https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/pinyonscript/PinyonScript-Regular.ttf'),
           fetchFontAsBase64('https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/alice/Alice-Regular.ttf')
@@ -81,68 +156,77 @@ export default function App() {
   };
 
   const processCSVData = (csvText) => {
+    // Treat the data as a raw 2D array to prevent "missing header" bugs
     window.Papa.parse(csvText, {
-      header: true,
+      header: false,
       skipEmptyLines: true,
       complete: (results) => {
         const data = results.data;
-        const extractedAddresses = data
-          .map(row => {
-            const toTitleCase = (str) => {
-              if (!str) return '';
-              return str.toLowerCase().replace(/\b\w/g, s => s.toUpperCase());
+        if (!data || data.length === 0) {
+          setError('No valid data found in the spreadsheet.');
+          setLoading(false);
+          return;
+        }
+
+        // 1. Smartly detect the true Header Row
+        let bestHeaderRowIdx = -1;
+        let maxScore = 0;
+        const expectedKeywords = ['shipping', 'name', 'first', 'last', 'address', 'street', 'city', 'province', 'state', 'zip', 'postal', 'product', 'item', 'apartment', 'main'];
+
+        for (let i = 0; i < Math.min(5, data.length); i++) {
+          const rowStr = data[i].join(' ').toLowerCase();
+          let score = 0;
+          expectedKeywords.forEach(kw => {
+            if (rowStr.includes(kw)) score++;
+          });
+          if (score > maxScore) {
+            maxScore = score;
+            bestHeaderRowIdx = i;
+          }
+        }
+
+        let extractedAddresses = [];
+
+        // 2. If we confidently found headers, map the data directly
+        if (maxScore >= 2) {
+          const headerRow = data[bestHeaderRowIdx].map(h => String(h).toLowerCase().replace(/[^a-z0-9]/g, ''));
+          
+          for (let i = bestHeaderRowIdx + 1; i < data.length; i++) {
+            const row = data[i];
+            
+            const getCol = (possibleNames) => {
+              const idx = headerRow.findIndex(h => possibleNames.some(pn => h === pn || (h.length >= 3 && h.includes(pn))));
+              return idx !== -1 && row[idx] != null ? String(row[idx]).trim() : '';
             };
 
-            const firstName = (row['shipping first name'] || '').trim();
-            const lastName = (row['shipping last name'] || '').trim();
-            const nameLine = `${firstName} ${lastName}`.trim();
+            const firstName = getCol(['shippingfirstname', 'firstname', 'first']);
+            const lastName = getCol(['shippinglastname', 'lastname', 'last']);
+            const name = firstName || lastName ? `${firstName} ${lastName}`.trim() : getCol(['shippingname', 'name', 'fullname', 'contact']);
             
-            const addr1 = toTitleCase((row['shipping address1'] || '').trim());
-            const addr2 = toTitleCase((row['shipping address2'] || '').trim());
-            const city = toTitleCase((row['shipping city'] || '').trim());
-            const state = (row['shipping province code'] || row['shipping province'] || '').trim().toUpperCase();
-            const zip = (row['shipping zip'] || '').trim();
-            let country = (row['shipping country'] || '').trim();
-            const isUS = !country || ['US', 'USA', 'UNITED STATES', 'UNITED STATES OF AMERICA'].includes(country.toUpperCase());
+            const addr2 = getCol(['apartment', 'shippingaddress2', 'address2', 'suite', 'apt']);
+            const addr1 = getCol(['main', 'shippingaddress1', 'shippingaddress', 'address1', 'address', 'street']);
+            const city = getCol(['shippingcity', 'city']);
+            const prov = getCol(['stateshortform', 'shippingprovince', 'shippingstate', 'province', 'state']);
+            const zip = getCol(['shippingzip', 'shippingzipcode', 'shippingpostalcode', 'zipcode', 'postalcode', 'zip', 'postal']);
+            const product = getCol(['product', 'item', 'lineitem', 'variant', 'title']);
+            const colA = row[0] != null ? String(row[0]).trim() : '';
+            
+            if (name || addr1 || city || zip) {
+              extractedAddresses.push({ name, addr1, addr2, city, prov, zip, product, colA, isStructured: true });
+            }
+          }
+        } else {
+          // Fallback: No headers detected, try to read the raw blocks
+          extractedAddresses = data.map(row => {
+             let rawStr = String(row[3] || row[1] || row[0] || '').trim();
+             const colA = row[0] != null ? String(row[0]).trim() : '';
+             if (!rawStr) return null;
+             return { raw: rawStr, colA, isStructured: false };
+          }).filter(Boolean);
+        }
 
-            if (!isUS) {
-                country = country.toUpperCase();
-            } else {
-                country = '';
-            }
-            
-            // Skip rows completely empty of both name and address lines
-            if (!nameLine && !addr1 && !city) return null;
-            
-            let addressString = nameLine;
-            if (addr1) addressString += `\n${addr1}`;
-            if (addr2) addressString += `\n${addr2}`;
-            
-            let cityStateZip = '';
-            if (!isUS) {
-                // International format: Zip City (drop state)
-                if (zip) cityStateZip += zip;
-                if (city) cityStateZip += (cityStateZip ? ' ' : '') + city;
-            } else {
-                // US format: City State Zip
-                if (city) cityStateZip += city;
-                if (state) cityStateZip += (cityStateZip ? ' ' : '') + state;
-                if (zip) cityStateZip += (cityStateZip ? ' ' : '') + zip;
-            }
-            cityStateZip = cityStateZip.trim();
-
-            if (cityStateZip) {
-               addressString += `\n${cityStateZip}`;
-            }
-            if (country) {
-               addressString += `\n${country}`;
-            }
-            return addressString;
-          })
-          .filter(address => address !== null);
-          
         if (extractedAddresses.length === 0) {
-          setError('No valid shipping addresses found. Please verify your CSV has columns like "shipping first name", "shipping address1", etc.');
+          setError('No valid addresses found. Ensure your sheet has standard shipping columns.');
         } else {
           setAddresses(extractedAddresses);
           setSuccess(`Successfully imported ${extractedAddresses.length} addresses!`);
@@ -168,7 +252,6 @@ export default function App() {
       return;
     }
 
-    // Use Google Visualization API to get CSV export (works for public sheets)
     const exportUrl = `https://docs.google.com/spreadsheets/d/${details.id}/gviz/tq?tqx=out:csv&gid=${details.gid}`;
 
     try {
@@ -176,7 +259,6 @@ export default function App() {
       if (!response.ok) throw new Error('Network response was not ok');
       const csvText = await response.text();
       
-      // If it returns HTML instead of CSV, it's likely private/unauthorized
       if (csvText.trim().toLowerCase().startsWith('<!doctype html>')) {
          throw new Error('Unauthorized');
       }
@@ -213,12 +295,6 @@ export default function App() {
     setAddresses(newAddresses);
   };
 
-  const removeFirstRow = () => {
-    if (addresses.length > 0) {
-      removeAddress(0);
-    }
-  };
-
   const buildPDF = () => {
     if (!scriptsLoaded || !window.jspdf) {
       setError('PDF library is still loading, please wait a moment.');
@@ -231,13 +307,13 @@ export default function App() {
       let orientation = 'portrait';
       
       if (pageSize === '4x6') {
-        format = [101.6, 152.4]; // 4x6 inches in mm
+        format = [101.6, 152.4]; 
         orientation = 'landscape';
       } else if (pageSize === '5x7') {
-        format = [127, 177.8]; // 5x7 inches in mm
+        format = [127, 177.8]; 
         orientation = 'portrait';
       } else if (pageSize === '5x7-landscape') {
-        format = [127, 177.8]; // 5x7 inches in mm
+        format = [127, 177.8]; 
         orientation = 'landscape';
       }
       
@@ -247,7 +323,6 @@ export default function App() {
         format: format
       });
 
-      // Add custom fonts to VFS
       if (fonts.pinyon && fonts.alice) {
         doc.addFileToVFS('PinyonScript-Regular.ttf', fonts.pinyon);
         doc.addFont('PinyonScript-Regular.ttf', 'Pinyon', 'normal');
@@ -261,71 +336,103 @@ export default function App() {
           doc.addPage();
         }
 
-        const ptToMm = 0.352778; // 1 point is exactly 0.352778 mm
+        const ptToMm = 0.352778; 
 
-        // Draw Return Address (Top Left)
-        const returnName = "Aishwarya Kapa";
+        // Draw Column A value (Top Right Corner, 0.5" from edges)
+        if (address.colA) {
+          doc.setFont('Alice', 'normal');
+          doc.setFontSize(14);
+          // 0.5 inches = 12.7 mm
+          doc.text(address.colA, doc.internal.pageSize.getWidth() - 12.7, 12.7, { align: 'right', baseline: 'top' });
+        }
+
+        // Draw Return Address
+        let returnY = 6.35; 
+        const returnX = 6.35; 
+
+        doc.setFont('Pinyon', 'normal');
+        doc.setFontSize(20);
+        doc.text("Aishwarya Kapa", returnX, returnY, { align: 'left', baseline: 'top' });
+        
+        returnY += (20 * ptToMm) + 1.5; 
+        
+        doc.setFont('Alice', 'normal');
+        doc.setFontSize(12);
+        const returnLineHeight = 12 * ptToMm * 1.1; 
         const returnAddressLines = [
           "7052 Santa Teresa Blvd #1052",
           "San Jose CA 95139"
         ];
-        
-        let returnY = 6.35; // 0.25 inch from top margin
-        const returnX = 6.35; // 0.25 inch from left margin
-        
-        // Draw Return Name
-        doc.setFont('Pinyon', 'normal');
-        doc.setFontSize(20);
-        doc.text(returnName, returnX, returnY, { align: 'left', baseline: 'top' });
-        
-        // Advance Y with extra spacing so the cursive loops do not touch the next line
-        returnY += (20 * ptToMm * 1.25);
-        
-        // Draw Remaining Return Address
-        doc.setFont('Alice', 'normal');
-        doc.setFontSize(12);
-        const returnLineHeight = 12 * ptToMm * 0.9; // 12pt with 0.9 spacing
         
         returnAddressLines.forEach(line => {
           doc.text(line, returnX, returnY, { align: 'left', baseline: 'top' });
           returnY += returnLineHeight;
         });
 
-        const addressLines = address.split(/\r?\n/).map(l => l.trim()).filter(l => l);
-        if (addressLines.length === 0) return;
-
-        let nameLine = addressLines[0];
-        // Convert name (first line) to Title Case
-        nameLine = nameLine.toLowerCase().replace(/\b\w/g, s => s.toUpperCase());
+        let nameLine = '';
+        let restLines = [];
+        let isTaylorMay = false;
         
-        const restLines = addressLines.slice(1);
+        if (address.isStructured) {
+            nameLine = address.name;
+            
+            // Check for the specific product to add the star
+            if (address.product && address.product.toLowerCase().replace(/['\u2018\u2019]/g, "'").includes("mail club (taylor's version) - may")) {
+                isTaylorMay = true;
+            }
 
-        const nameSizePt = 56;
+            // 1st Line (Under Name): Apartment
+            if (address.addr2) restLines.push(formatAddressStr(address.addr2));
+            // 2nd Line: Main Address
+            if (address.addr1) restLines.push(formatAddressStr(address.addr1));
+            
+            // 3rd Line: City State Zip (No comma, State in CAPS)
+            const city = formatAddressStr(address.city);
+            const prov = getShortProvince(address.prov);
+            const zip = address.zip ? address.zip.toUpperCase() : '';
+            
+            const lastLine = [city, prov, zip].filter(Boolean).join(' ');
+            if (lastLine) restLines.push(lastLine);
+        } else {
+            const rawLines = address.raw.split(/\r?\n/).map(l => l.trim()).filter(l => l);
+            if (rawLines.length === 0) return;
+            nameLine = rawLines[0];
+            restLines = rawLines.slice(1).map((l, i, arr) => formatAddressStr(l, i === arr.length - 1));
+        }
+
+        if (!nameLine && restLines.length === 0) return;
+
+        nameLine = toTitleCase(nameLine);
+
+        let nameSizePt = 56;
         const restSizePt = 18;
-        const nameHeightMm = nameSizePt * ptToMm;
         const restHeightMm = restSizePt * ptToMm;
 
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageHeight = doc.internal.pageSize.getHeight();
         
-        let x = 10; // Left margin
+        let x = 10; 
         if (align === 'center') {
           x = pageWidth / 2;
         } else if (align === 'right') {
           x = pageWidth - 10;
         }
 
+        doc.setFont('Pinyon', 'normal');
+        doc.setFontSize(nameSizePt);
+        while (doc.getTextWidth(nameLine) > (pageWidth - 20) && nameSizePt > 24) {
+            nameSizePt -= 2;
+            doc.setFontSize(nameSizePt);
+        }
+        const nameHeightMm = nameSizePt * ptToMm;
+
         const linesToDraw = [];
         
-        // Wrap Name Line
-        doc.setFont('Pinyon', 'normal');
-        doc.setFontSize(nameSizePt); // Currently set to 56
         const wrappedNameLines = doc.splitTextToSize(nameLine, pageWidth - 20);
         wrappedNameLines.forEach(text => {
             linesToDraw.push({ text, font: 'Pinyon', size: nameSizePt, height: nameHeightMm });
         });
 
-        // Wrap Remaining Address Lines
         doc.setFont('Alice', 'normal');
         doc.setFontSize(restSizePt);
         restLines.forEach(line => {
@@ -335,15 +442,15 @@ export default function App() {
              });
         });
 
-        // Calculate Block Spacing
-        const lineSpacingMm = 2; // Standard space between wrap/lines
-        const sectionSpacingMm = 6; // Extra space between the Name and Address
+        const lineSpacingMm = 0.8; 
+        const sectionSpacingMm = 7; 
         
         let totalHeight = 0;
         linesToDraw.forEach((line, idx) => {
             totalHeight += line.height;
             if (idx < linesToDraw.length - 1) {
-                if (line.font === 'Pinyon' && linesToDraw[idx+1].font === 'Alice') {
+                const nextLine = linesToDraw[idx+1];
+                if (line.font === 'Pinyon' && nextLine.font === 'Alice') {
                     totalHeight += sectionSpacingMm;
                 } else {
                     totalHeight += lineSpacingMm;
@@ -351,20 +458,46 @@ export default function App() {
             }
         });
 
-        // Determine starting Y to center ONLY the receiver name vertically
-        let nameBlockHeight = 0;
-        linesToDraw.forEach((line, idx) => {
-            if (line.font === 'Pinyon') {
-                nameBlockHeight += line.height;
-                if (idx < linesToDraw.length - 1 && linesToDraw[idx+1].font === 'Pinyon') {
-                    nameBlockHeight += lineSpacingMm;
+        const verticalShiftMm = 6.35;
+        let currentY = (pageHeight / 2) - (totalHeight / 2) + verticalShiftMm;
+
+        // Draw Star independently above the text block so the address never moves
+        if (isTaylorMay) {
+            const points = 5;
+            const outerRadius = 2.54; // 0.1 inch (total height ~0.2 inch)
+            const innerRadius = 1.0;
+            
+            let cx = x;
+            if (align === 'left') cx = x + outerRadius;
+            if (align === 'right') cx = x - outerRadius;
+            
+            const starCenterY = currentY - outerRadius - 2; // 2mm gap above the top of the text block
+            
+            let startX, startY;
+            let pathLines = [];
+            
+            for (let i = 0; i < points * 2; i++) {
+                const radius = i % 2 === 0 ? outerRadius : innerRadius;
+                const angle = (i * Math.PI) / points - Math.PI / 2;
+                const px = radius * Math.cos(angle);
+                const py = radius * Math.sin(angle);
+                
+                if (i === 0) {
+                    startX = cx + px;
+                    startY = starCenterY + py;
+                } else {
+                    const prevRadius = (i - 1) % 2 === 0 ? outerRadius : innerRadius;
+                    const prevAngle = ((i - 1) * Math.PI) / points - Math.PI / 2;
+                    const prevPx = prevRadius * Math.cos(prevAngle);
+                    const prevPy = prevRadius * Math.sin(prevAngle);
+                    pathLines.push([px - prevPx, py - prevPy]);
                 }
             }
-        });
-        
-        let currentY = (pageHeight / 2) - (nameBlockHeight / 2);
+            
+            doc.setFillColor(0, 0, 0); // Black Star
+            doc.lines(pathLines, startX, startY, [1, 1], 'F', true);
+        }
 
-        // Draw Lines
         linesToDraw.forEach((line, idx) => {
             const yCenter = currentY + (line.height / 2);
             doc.setFont(line.font, 'normal');
@@ -376,7 +509,8 @@ export default function App() {
             
             currentY += line.height;
             if (idx < linesToDraw.length - 1) {
-                if (line.font === 'Pinyon' && linesToDraw[idx+1].font === 'Alice') {
+                const nextLine = linesToDraw[idx+1];
+                if (line.font === 'Pinyon' && nextLine.font === 'Alice') {
                     currentY += sectionSpacingMm;
                 } else {
                     currentY += lineSpacingMm;
@@ -402,7 +536,6 @@ export default function App() {
       const doc = buildPDF();
       if (!doc) throw new Error("PDF generation failed");
 
-      // Load PDF.js dynamically to render preview safely in sandboxed iframes
       if (!window.pdfjsLib) {
         await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
         window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -412,7 +545,7 @@ export default function App() {
       const pdf = await window.pdfjsLib.getDocument({ data: pdfData }).promise;
       
       const numPages = pdf.numPages;
-      const maxPages = numPages; // Show all pages as requested
+      const maxPages = Math.min(numPages, 10); 
       const images = [];
 
       for (let i = 1; i <= maxPages; i++) {
@@ -458,13 +591,11 @@ export default function App() {
     <div className="min-h-screen bg-gray-50 p-6 md:p-10 font-sans text-gray-800">
       <div className="max-w-5xl mx-auto space-y-8">
         
-        {/* Header */}
         <div className="text-center space-y-2">
           <h1 className="text-3xl md:text-4xl font-bold text-gray-900 tracking-tight">Address PDF Generator</h1>
           <p className="text-gray-500">Import your Google Sheet and create a 1-address-per-page PDF instantly.</p>
         </div>
 
-        {/* Alerts */}
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl flex items-start gap-3 shadow-sm">
             <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
@@ -480,10 +611,8 @@ export default function App() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
-          {/* Left Column: Input & Settings */}
           <div className="lg:col-span-1 space-y-6">
             
-            {/* Import Card */}
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
                 <LinkIcon className="w-5 h-5 text-blue-500" />
@@ -531,7 +660,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Settings Card */}
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
                 <Settings className="w-5 h-5 text-purple-500" />
@@ -580,7 +708,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Action Card */}
             <div className="bg-gradient-to-br from-blue-600 to-purple-600 p-6 rounded-2xl shadow-md text-white">
               <h2 className="text-lg font-semibold mb-2">Ready to Print?</h2>
               <p className="text-blue-100 text-sm mb-5">
@@ -611,7 +738,6 @@ export default function App() {
 
           </div>
 
-          {/* Right Column: Preview Table */}
           <div className="lg:col-span-2">
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 h-full flex flex-col overflow-hidden">
               <div className="p-4 md:p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
@@ -619,14 +745,6 @@ export default function App() {
                   <FileText className="w-5 h-5 text-gray-500" />
                   Address Preview
                 </h2>
-                {addresses.length > 0 && (
-                  <button 
-                    onClick={removeFirstRow}
-                    className="text-xs font-medium text-orange-600 hover:text-orange-700 hover:bg-orange-50 px-3 py-1.5 rounded-md transition-colors"
-                  >
-                    Remove Header Row
-                  </button>
-                )}
               </div>
               
               <div className="flex-1 overflow-auto p-0">
@@ -638,25 +756,53 @@ export default function App() {
                   </div>
                 ) : (
                   <ul className="divide-y divide-gray-100">
-                    {addresses.map((addr, index) => (
-                      <li key={index} className="flex items-center hover:bg-gray-50 transition-colors group">
-                        <div className="flex-shrink-0 w-12 text-center text-xs font-medium text-gray-400 py-4">
-                          {index + 1}
-                        </div>
-                        <div className="flex-1 py-4 px-2 pr-4 text-sm text-gray-800 whitespace-pre-wrap">
-                          {addr}
-                        </div>
-                        <div className="pr-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button 
-                            onClick={() => removeAddress(index)}
-                            className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Remove this address"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </li>
-                    ))}
+                    {addresses.map((addr, index) => {
+                      let displayLines = '';
+                      const isTaylorMay = addr.product && addr.product.toLowerCase().replace(/['\u2018\u2019]/g, "'").includes("mail club (taylor's version) - may");
+                      const prefix = isTaylorMay ? "★ " : "";
+
+                      if (addr.isStructured) {
+                        const city = formatAddressStr(addr.city);
+                        const prov = getShortProvince(addr.prov);
+                        const zip = (addr.zip || '').toUpperCase();
+                        const lastLine = [city, prov, zip].filter(Boolean).join(' ');
+
+                        displayLines = [
+                          prefix + toTitleCase(addr.name),
+                          formatAddressStr(addr.addr2), // Apartment
+                          formatAddressStr(addr.addr1), // Main Address
+                          lastLine                      // City State Zip
+                        ].filter(Boolean).join('\n');
+                      } else {
+                        const rawLines = addr.raw.split(/\r?\n/).map(l => l.trim()).filter(l => l);
+                        if (rawLines.length > 0) {
+                          displayLines = [
+                            prefix + toTitleCase(rawLines[0]),
+                            ...rawLines.slice(1).map((l, i, arr) => formatAddressStr(l, i === arr.length - 1))
+                          ].join('\n');
+                        }
+                      }
+
+                      return (
+                        <li key={index} className="flex items-center hover:bg-gray-50 transition-colors group">
+                          <div className="flex-shrink-0 w-12 text-center text-xs font-medium text-gray-400 py-4">
+                            {index + 1}
+                          </div>
+                          <div className="flex-1 py-4 px-2 pr-4 text-sm text-gray-800 whitespace-pre-wrap">
+                            {displayLines}
+                          </div>
+                          <div className="pr-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button 
+                              onClick={() => removeAddress(index)}
+                              className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Remove this address"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </div>
@@ -666,7 +812,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* PDF Preview Modal */}
       {showPreview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 md:p-8 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-full max-h-[90vh] flex flex-col overflow-hidden">
