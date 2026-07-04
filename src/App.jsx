@@ -114,7 +114,7 @@ const matchMonth = (birthdayMonthStr, targetMonthStr) => {
 export default function App() {
   console.log("App version: 2026-07-04T16:03:00-07:00");
   const [scriptsLoaded, setScriptsLoaded] = useState(false);
-  const [url, setUrl] = useState('https://docs.google.com/spreadsheets/d/18TqnvZDTxSILCh2GijsZPKs0zczKhRvi1s5YmFE9Reo/edit?gid=0#gid=0');
+  const [url, setUrl] = useState('');
   const [addresses, setAddresses] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -265,6 +265,12 @@ export default function App() {
   const handleFetchUrl = async () => {
     setError('');
     setSuccess('');
+
+    if (!url.trim()) {
+      setError('Google Sheet URL is required. Please paste a URL above.');
+      return;
+    }
+
     setLoading(true);
 
     const details = extractSheetDetails(url);
@@ -661,11 +667,12 @@ export default function App() {
               
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Google Sheet URL</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Google Sheet URL <span className="text-red-500">*</span></label>
                   <input 
                     type="text" 
                     value={url}
                     onChange={(e) => setUrl(e.target.value)}
+                    required
                     className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                     placeholder="https://docs.google.com/spreadsheets/d/..."
                   />
