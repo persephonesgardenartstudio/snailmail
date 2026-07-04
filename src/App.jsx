@@ -92,6 +92,23 @@ const formatAddressStr = (str, preserveState = false) => {
   return formatted;
 };
 
+const matchMonth = (birthdayMonthStr, targetMonthStr) => {
+  if (!birthdayMonthStr || !targetMonthStr) return false;
+  const normalizedBday = birthdayMonthStr.toLowerCase().replace(/['\u2018\u2019]/g, "'");
+  const normalizedTarget = targetMonthStr.toLowerCase();
+  
+  if (normalizedBday.includes(normalizedTarget)) {
+    return true;
+  }
+  
+  const shortTarget = normalizedTarget.substring(0, 3);
+  if (shortTarget.length === 3 && normalizedBday.includes(shortTarget)) {
+    return true;
+  }
+  
+  return false;
+};
+
 export default function App() {
   const [scriptsLoaded, setScriptsLoaded] = useState(false);
   const [url, setUrl] = useState('https://docs.google.com/spreadsheets/d/18TqnvZDTxSILCh2GijsZPKs0zczKhRvi1s5YmFE9Reo/edit?gid=0#gid=0');
@@ -103,6 +120,7 @@ export default function App() {
   // PDF Settings
   const [pageSize, setPageSize] = useState('letter');
   const [align, setAlign] = useState('center');
+  const [selectedMonth, setSelectedMonth] = useState('');
   const [fonts, setFonts] = useState({ pinyon: null, alice: null });
 
   // Preview State
@@ -171,7 +189,7 @@ export default function App() {
         // 1. Smartly detect the true Header Row
         let bestHeaderRowIdx = -1;
         let maxScore = 0;
-        const expectedKeywords = ['shipping', 'name', 'first', 'last', 'address', 'street', 'city', 'province', 'state', 'zip', 'postal', 'product', 'item', 'apartment', 'main'];
+        const expectedKeywords = ['shipping', 'name', 'first', 'last', 'address', 'street', 'city', 'province', 'state', 'zip', 'postal', 'product', 'item', 'apartment', 'main', 'birthdaymonth', 'birthday', 'month'];
 
         for (let i = 0; i < Math.min(5, data.length); i++) {
           const rowStr = data[i].join(' ').toLowerCase();
@@ -209,10 +227,11 @@ export default function App() {
             const prov = getCol(['stateshortform', 'shippingprovince', 'shippingstate', 'province', 'state']);
             const zip = getCol(['shippingzip', 'shippingzipcode', 'shippingpostalcode', 'zipcode', 'postalcode', 'zip', 'postal']);
             const product = getCol(['product', 'item', 'lineitem', 'variant', 'title']);
+            const birthdayMonth = getCol(['birthdaymonth', 'birthday', 'month']);
             const colA = row[0] != null ? String(row[0]).trim() : '';
             
             if (name || addr1 || city || zip) {
-              extractedAddresses.push({ name, addr1, addr2, city, prov, zip, product, colA, isStructured: true });
+              extractedAddresses.push({ name, addr1, addr2, city, prov, zip, product, birthdayMonth, colA, isStructured: true });
             }
           }
         } else {
@@ -296,6 +315,10 @@ export default function App() {
   };
 
   const buildPDF = () => {
+    if (!selectedMonth) {
+      setError('Snail Mail Month is a required option.');
+      return null;
+    }
     if (!scriptsLoaded || !window.jspdf) {
       setError('PDF library is still loading, please wait a moment.');
       return null;
@@ -372,6 +395,7 @@ export default function App() {
         let nameLine = '';
         let restLines = [];
         let isTaylorMay = false;
+        let hasBirthdayMonthStar = false;
         
         if (address.isStructured) {
             nameLine = address.name;
@@ -379,6 +403,11 @@ export default function App() {
             // Check for the specific product to add the star
             if (address.product && address.product.toLowerCase().replace(/['\u2018\u2019]/g, "'").includes("mail club (taylor's version) - may")) {
                 isTaylorMay = true;
+            }
+            
+            // Check if selected snail mail month matches birthday month
+            if (selectedMonth && address.birthdayMonth && matchMonth(address.birthdayMonth, selectedMonth)) {
+                hasBirthdayMonthStar = true;
             }
 
             // 1st Line (Under Name): Apartment
@@ -462,7 +491,7 @@ export default function App() {
         let currentY = (pageHeight / 2) - (totalHeight / 2) + verticalShiftMm;
 
         // Draw Star independently above the text block so the address never moves
-        if (isTaylorMay) {
+        if (isTaylorMay || hasBirthdayMonthStar) {
             const points = 5;
             const outerRadius = 2.54; // 0.1 inch (total height ~0.2 inch)
             const innerRadius = 1.0;
@@ -528,6 +557,10 @@ export default function App() {
   };
 
   const handlePreview = async () => {
+    if (!selectedMonth) {
+      setError('Snail Mail Month is a required option.');
+      return;
+    }
     setIsPreviewLoading(true);
     setShowPreview(true);
     setPreviewImages([]);
@@ -572,6 +605,10 @@ export default function App() {
   };
 
   const generatePDF = () => {
+    if (!selectedMonth) {
+      setError('Snail Mail Month is a required option.');
+      return;
+    }
     const doc = buildPDF();
     if (doc) {
       doc.save('Customer_Addresses.pdf');
@@ -683,6 +720,32 @@ export default function App() {
                 </div>
 
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Snail Mail Month <span className="text-red-500">*</span>
+                  </label>
+                  <select 
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(e.target.value)}
+                    className={`w-full border rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-purple-500 transition-colors ${!selectedMonth ? 'border-red-300 bg-red-50/10' : 'border-gray-300'}`}
+                    required
+                  >
+                    <option value="">-- Select Month --</option>
+                    <option value="January">January</option>
+                    <option value="February">February</option>
+                    <option value="March">March</option>
+                    <option value="April">April</option>
+                    <option value="May">May</option>
+                    <option value="June">June</option>
+                    <option value="July">July</option>
+                    <option value="August">August</option>
+                    <option value="September">September</option>
+                    <option value="October">October</option>
+                    <option value="November">November</option>
+                    <option value="December">December</option>
+                  </select>
+                </div>
+
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Text Alignment</label>
                   <div className="flex bg-gray-100 rounded-lg p-1">
                     <button 
@@ -719,7 +782,7 @@ export default function App() {
               <div className="flex flex-col gap-3">
                 <button 
                   onClick={handlePreview}
-                  disabled={addresses.length === 0}
+                  disabled={addresses.length === 0 || !selectedMonth}
                   className="w-full bg-blue-500/30 hover:bg-blue-500/50 text-white font-bold py-3 rounded-lg transition-colors flex justify-center items-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed border border-blue-400/50"
                 >
                   <Eye className="w-5 h-5" />
@@ -727,7 +790,7 @@ export default function App() {
                 </button>
                 <button 
                   onClick={generatePDF}
-                  disabled={addresses.length === 0}
+                  disabled={addresses.length === 0 || !selectedMonth}
                   className="w-full bg-white text-blue-700 hover:bg-gray-50 font-bold py-3 rounded-lg transition-colors flex justify-center items-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Download className="w-5 h-5" />
@@ -754,12 +817,19 @@ export default function App() {
                     <p className="text-lg font-medium text-gray-500">No addresses loaded</p>
                     <p className="text-sm mt-1">Fetch from the URL or upload a CSV to see the preview here.</p>
                   </div>
+                ) : !selectedMonth ? (
+                  <div className="h-full min-h-[400px] flex flex-col items-center justify-center text-gray-400 p-8 text-center bg-gray-50/50">
+                    <Settings className="w-16 h-16 mb-4 opacity-20 text-purple-500" />
+                    <p className="text-lg font-medium text-purple-600">Snail Mail Month Required</p>
+                    <p className="text-sm mt-1 max-w-sm mx-auto">Please select a Snail Mail Month under PDF Settings on the left to preview and generate PDFs.</p>
+                  </div>
                 ) : (
                   <ul className="divide-y divide-gray-100">
                     {addresses.map((addr, index) => {
                       let displayLines = '';
                       const isTaylorMay = addr.product && addr.product.toLowerCase().replace(/['\u2018\u2019]/g, "'").includes("mail club (taylor's version) - may");
-                      const prefix = isTaylorMay ? "★ " : "";
+                      const hasBirthdayMonthStar = selectedMonth && addr.birthdayMonth && matchMonth(addr.birthdayMonth, selectedMonth);
+                      const prefix = (isTaylorMay || hasBirthdayMonthStar) ? "★ " : "";
 
                       if (addr.isStructured) {
                         const city = formatAddressStr(addr.city);
