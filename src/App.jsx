@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, Download, Link as LinkIcon, Upload, Trash2, AlertCircle, CheckCircle2, FileUp, Settings, Eye, X, Loader2 } from 'lucide-react';
 
+// Deploy trigger: 2026-07-04T16:03:00-07:00
+
 // Utility to load external scripts dynamically
 const loadScript = (src) => {
   return new Promise((resolve, reject) => {
