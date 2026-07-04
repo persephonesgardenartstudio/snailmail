@@ -112,6 +112,7 @@ const matchMonth = (birthdayMonthStr, targetMonthStr) => {
 };
 
 export default function App() {
+  console.log("App version: 2026-07-04T16:03:00-07:00");
   const [scriptsLoaded, setScriptsLoaded] = useState(false);
   const [url, setUrl] = useState('https://docs.google.com/spreadsheets/d/18TqnvZDTxSILCh2GijsZPKs0zczKhRvi1s5YmFE9Reo/edit?gid=0#gid=0');
   const [addresses, setAddresses] = useState([]);
