@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, Download, Link as LinkIcon, Upload, Trash2, AlertCircle, CheckCircle2, FileUp, Settings, Eye, X, Loader2 } from 'lucide-react';
 
-// Deploy trigger: 2026-07-04T16:03:00-07:00
+// Deploy trigger: 2026-07-04T23:57:00-07:00
 
 // Utility to load external scripts dynamically
 const loadScript = (src) => {
@@ -112,7 +112,7 @@ const matchMonth = (birthdayMonthStr, targetMonthStr) => {
 };
 
 export default function App() {
-  console.log("App version: 2026-07-04T16:03:00-07:00");
+  console.log("App version: 2026-07-04T23:57:00-07:00");
   const [scriptsLoaded, setScriptsLoaded] = useState(false);
   const [url, setUrl] = useState('');
   const [addresses, setAddresses] = useState([]);
@@ -211,12 +211,19 @@ export default function App() {
         // 2. If we confidently found headers, map the data directly
         if (maxScore >= 2) {
           const headerRow = data[bestHeaderRowIdx].map(h => String(h).toLowerCase().replace(/[^a-z0-9]/g, ''));
+          console.log('Detected headers:', headerRow);
+          console.log('Header row index:', bestHeaderRowIdx, 'Score:', maxScore);
           
           for (let i = bestHeaderRowIdx + 1; i < data.length; i++) {
             const row = data[i];
             
             const getCol = (possibleNames) => {
-              const idx = headerRow.findIndex(h => possibleNames.some(pn => h === pn || (h.length >= 3 && h.includes(pn))));
+              // Primary: header contains the keyword
+              let idx = headerRow.findIndex(h => possibleNames.some(pn => h === pn || (h.length >= 3 && h.includes(pn))));
+              // Secondary fallback: keyword contains the header (for short/truncated headers)
+              if (idx === -1) {
+                idx = headerRow.findIndex(h => h.length >= 3 && possibleNames.some(pn => pn.includes(h)));
+              }
               return idx !== -1 && row[idx] != null ? String(row[idx]).trim() : '';
             };
 
@@ -228,12 +235,39 @@ export default function App() {
             const addr1 = getCol(['main', 'shippingaddress1', 'shippingaddress', 'address1', 'address', 'street']);
             const city = getCol(['shippingcity', 'city']);
             const prov = getCol(['stateshortform', 'shippingprovince', 'shippingstate', 'province', 'state']);
-            const zip = getCol(['shippingzip', 'shippingzipcode', 'shippingpostalcode', 'zipcode', 'postalcode', 'zip', 'postal']);
+            let zip = getCol(['shippingzip', 'shippingzipcode', 'shippingpostalcode', 'zipcode', 'postalcode', 'zip', 'postal']);
+            
+            // Fallback: if zip wasn't found via column headers, scan the row for zipcode-pattern values
+            if (!zip) {
+              const usedIndices = new Set();
+              // Track which columns are already mapped
+              ['shippingfirstname', 'firstname', 'first'].forEach(pn => { const i = headerRow.findIndex(h => h === pn || (h.length >= 3 && h.includes(pn))); if (i !== -1) usedIndices.add(i); });
+              ['shippinglastname', 'lastname', 'last'].forEach(pn => { const i = headerRow.findIndex(h => h === pn || (h.length >= 3 && h.includes(pn))); if (i !== -1) usedIndices.add(i); });
+              ['apartment', 'shippingaddress2', 'address2', 'suite', 'apt'].forEach(pn => { const i = headerRow.findIndex(h => h === pn || (h.length >= 3 && h.includes(pn))); if (i !== -1) usedIndices.add(i); });
+              ['main', 'shippingaddress1', 'shippingaddress', 'address1', 'address', 'street'].forEach(pn => { const i = headerRow.findIndex(h => h === pn || (h.length >= 3 && h.includes(pn))); if (i !== -1) usedIndices.add(i); });
+              ['shippingcity', 'city'].forEach(pn => { const i = headerRow.findIndex(h => h === pn || (h.length >= 3 && h.includes(pn))); if (i !== -1) usedIndices.add(i); });
+              ['stateshortform', 'shippingprovince', 'shippingstate', 'province', 'state'].forEach(pn => { const i = headerRow.findIndex(h => h === pn || (h.length >= 3 && h.includes(pn))); if (i !== -1) usedIndices.add(i); });
+              
+              const zipPattern = /^\d{5}(-\d{4})?$|^[A-Za-z]\d[A-Za-z]\s?\d[A-Za-z]\d$/;
+              for (let j = 0; j < row.length; j++) {
+                if (usedIndices.has(j)) continue;
+                const val = row[j] != null ? String(row[j]).trim() : '';
+                if (val && zipPattern.test(val)) {
+                  zip = val;
+                  console.log(`Zipcode fallback: found '${val}' at column ${j} for row ${i}`);
+                  break;
+                }
+              }
+            }
+            
             const product = getCol(['product', 'item', 'lineitem', 'variant', 'title']);
             const birthdayMonth = getCol(['birthdaymonth', 'birthday', 'month']);
             const colA = row[0] != null ? String(row[0]).trim() : '';
             
             if (name || addr1 || city || zip) {
+              if (!zip) {
+                console.warn(`Row ${i}: No zipcode found for "${name}". Raw row data:`, row);
+              }
               extractedAddresses.push({ name, addr1, addr2, city, prov, zip, product, birthdayMonth, colA, isStructured: true });
             }
           }
