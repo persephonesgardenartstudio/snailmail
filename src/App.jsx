@@ -47,6 +47,20 @@ const toTitleCase = (str) => {
   return str.toLowerCase().replace(/\b\w/g, s => s.toUpperCase());
 };
 
+// Pad US zip codes to 5 digits with leading zeros (e.g. 7110 -> 07110)
+// Leaves zip+4 format (e.g. 95128-4223) and non-US postal codes unchanged
+const padUSZip = (zip, country) => {
+  if (!zip) return '';
+  const trimmed = zip.trim();
+  const c = (country || '').toLowerCase().trim();
+  const isUS = c === 'united states' || c === 'us' || c === 'usa' || c === 'united states of america' || c === '';
+  // Only pad pure numeric US zips shorter than 5 digits
+  if (isUS && /^\d+$/.test(trimmed) && trimmed.length < 5) {
+    return trimmed.padStart(5, '0');
+  }
+  return trimmed;
+};
+
 const formatAddressStr = (str, preserveState = false) => {
   if (!str) return '';
   
@@ -486,7 +500,7 @@ export default function App() {
             // 3rd Line: City State Zip (No comma, State in CAPS)
             const city = formatAddressStr(address.city);
             const prov = getShortProvince(address.prov);
-            const zip = address.zip ? address.zip.toUpperCase() : '';
+            const zip = address.zip ? padUSZip(address.zip, address.country).toUpperCase() : '';
             
             const lastLine = [city, prov, zip].filter(Boolean).join(' ');
             if (lastLine) restLines.push(lastLine);
@@ -934,7 +948,7 @@ export default function App() {
                       if (addr.isStructured) {
                         const city = formatAddressStr(addr.city);
                         const prov = getShortProvince(addr.prov);
-                        const zip = (addr.zip || '').toUpperCase();
+                        const zip = padUSZip(addr.zip, addr.country).toUpperCase();
                         const lastLine = [city, prov, zip].filter(Boolean).join(' ');
 
                         displayLines = [
