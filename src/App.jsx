@@ -262,13 +262,15 @@ export default function App() {
             
             const product = getCol(['product', 'item', 'lineitem', 'variant', 'title']);
             const birthdayMonth = getCol(['birthdaymonth', 'birthday', 'month']);
+            const quantityStr = getCol(['quantity', 'qty']);
+            const quantity = Math.max(1, parseInt(quantityStr, 10) || 1);
             const colA = row[0] != null ? String(row[0]).trim() : '';
             
             if (name || addr1 || city || zip) {
               if (!zip) {
                 console.warn(`Row ${i}: No zipcode found for "${name}". Raw row data:`, row);
               }
-              extractedAddresses.push({ name, addr1, addr2, city, prov, zip, product, birthdayMonth, colA, isStructured: true });
+              extractedAddresses.push({ name, addr1, addr2, city, prov, zip, product, birthdayMonth, colA, quantity, isStructured: true });
             }
           }
         } else {
@@ -397,10 +399,14 @@ export default function App() {
         doc.addFont('Alice-Regular.ttf', 'Alice', 'normal');
       }
 
-      addresses.forEach((address, index) => {
-        if (index > 0) {
+      let pageIndex = 0;
+      addresses.forEach((address) => {
+        const qty = address.quantity || 1;
+        for (let qIdx = 0; qIdx < qty; qIdx++) {
+        if (pageIndex > 0) {
           doc.addPage();
         }
+        pageIndex++;
 
         const ptToMm = 0.352778; 
 
@@ -589,6 +595,7 @@ export default function App() {
                 }
             }
         });
+        } // end quantity loop
       });
 
       return doc;
@@ -819,7 +826,7 @@ export default function App() {
               <h2 className="text-lg font-semibold mb-2">Ready to Print?</h2>
               <p className="text-blue-100 text-sm mb-5">
                 {addresses.length > 0 
-                  ? `You have ${addresses.length} addresses ready to be exported.`
+                  ? `You have ${addresses.reduce((sum, a) => sum + (a.quantity || 1), 0)} pages from ${addresses.length} addresses ready to be exported.`
                   : 'Import some addresses first to generate your PDF.'}
               </p>
               
@@ -897,6 +904,7 @@ export default function App() {
                         }
                       }
 
+                      const qty = addr.quantity || 1;
                       return (
                         <li key={index} className="flex items-center hover:bg-gray-50 transition-colors group">
                           <div className="flex-shrink-0 w-12 text-center text-xs font-medium text-gray-400 py-4">
@@ -904,6 +912,11 @@ export default function App() {
                           </div>
                           <div className="flex-1 py-4 px-2 pr-4 text-sm text-gray-800 whitespace-pre-wrap">
                             {displayLines}
+                            {qty > 1 && (
+                              <span className="inline-block mt-1 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full">
+                                ×{qty} pages
+                              </span>
+                            )}
                           </div>
                           <div className="pr-4 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button 
@@ -932,7 +945,7 @@ export default function App() {
             <div className="flex justify-between items-center p-4 border-b border-gray-100 bg-gray-50">
               <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
                 <Eye className="w-5 h-5 text-purple-600" />
-                PDF Preview {previewImages.length > 0 && <span className="text-sm font-normal text-gray-500 ml-2">(Showing {previewImages.length} of {addresses.length} pages)</span>}
+                PDF Preview {previewImages.length > 0 && <span className="text-sm font-normal text-gray-500 ml-2">(Showing {previewImages.length} of {addresses.reduce((sum, a) => sum + (a.quantity || 1), 0)} pages)</span>}
               </h3>
               <button
                 onClick={() => {
