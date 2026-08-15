@@ -124,6 +124,7 @@ export default function App() {
   const [pageSize, setPageSize] = useState('letter');
   const [align, setAlign] = useState('center');
   const [selectedMonth, setSelectedMonth] = useState('');
+  const [countryFilter, setCountryFilter] = useState('');
   const [fonts, setFonts] = useState({ pinyon: null, alice: null });
 
   // Preview State
@@ -264,13 +265,14 @@ export default function App() {
             const birthdayMonth = getCol(['birthdaymonth', 'birthday', 'month']);
             const quantityStr = getCol(['quantity', 'qty']);
             const quantity = Math.max(1, parseInt(quantityStr, 10) || 1);
+            const country = getCol(['shippingcountry', 'country']);
             const colA = row[0] != null ? String(row[0]).trim() : '';
             
             if (name || addr1 || city || zip) {
               if (!zip) {
                 console.warn(`Row ${i}: No zipcode found for "${name}". Raw row data:`, row);
               }
-              extractedAddresses.push({ name, addr1, addr2, city, prov, zip, product, birthdayMonth, colA, quantity, isStructured: true });
+              extractedAddresses.push({ name, addr1, addr2, city, prov, zip, product, birthdayMonth, colA, quantity, country, isStructured: true });
             }
           }
         } else {
@@ -359,9 +361,26 @@ export default function App() {
     setAddresses(newAddresses);
   };
 
+  // Compute filtered addresses based on country filter
+  const filteredAddresses = React.useMemo(() => {
+    if (!countryFilter) return addresses;
+    if (countryFilter === 'us') {
+      return addresses.filter(a => {
+        if (!a.isStructured) return true;
+        const c = (a.country || '').toLowerCase().trim();
+        return c === 'united states' || c === 'us' || c === 'usa' || c === 'united states of america';
+      });
+    }
+    return addresses; // 'all' returns everything
+  }, [addresses, countryFilter]);
+
   const buildPDF = () => {
     if (!selectedMonth) {
       setError('Snail Mail Month is a required option.');
+      return null;
+    }
+    if (!countryFilter) {
+      setError('Shipping Region is a required option.');
       return null;
     }
     if (!scriptsLoaded || !window.jspdf) {
@@ -400,7 +419,7 @@ export default function App() {
       }
 
       let pageIndex = 0;
-      addresses.forEach((address) => {
+      filteredAddresses.forEach((address) => {
         const qty = address.quantity || 1;
         for (let qIdx = 0; qIdx < qty; qIdx++) {
         if (pageIndex > 0) {
@@ -611,6 +630,10 @@ export default function App() {
       setError('Snail Mail Month is a required option.');
       return;
     }
+    if (!countryFilter) {
+      setError('Shipping Region is a required option.');
+      return;
+    }
     setIsPreviewLoading(true);
     setShowPreview(true);
     setPreviewImages([]);
@@ -657,6 +680,10 @@ export default function App() {
   const generatePDF = () => {
     if (!selectedMonth) {
       setError('Snail Mail Month is a required option.');
+      return;
+    }
+    if (!countryFilter) {
+      setError('Shipping Region is a required option.');
       return;
     }
     const doc = buildPDF();
@@ -797,6 +824,22 @@ export default function App() {
                 </div>
 
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Shipping Region <span className="text-red-500">*</span>
+                  </label>
+                  <select 
+                    value={countryFilter}
+                    onChange={(e) => setCountryFilter(e.target.value)}
+                    className={`w-full border rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-purple-500 transition-colors ${!countryFilter ? 'border-red-300 bg-red-50/10' : 'border-gray-300'}`}
+                    required
+                  >
+                    <option value="">-- Select Region --</option>
+                    <option value="us">United States Only</option>
+                    <option value="all">All Countries</option>
+                  </select>
+                </div>
+
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Text Alignment</label>
                   <div className="flex bg-gray-100 rounded-lg p-1">
                     <button 
@@ -826,14 +869,14 @@ export default function App() {
               <h2 className="text-lg font-semibold mb-2">Ready to Print?</h2>
               <p className="text-blue-100 text-sm mb-5">
                 {addresses.length > 0 
-                  ? `You have ${addresses.reduce((sum, a) => sum + (a.quantity || 1), 0)} pages from ${addresses.length} addresses ready to be exported.`
+                  ? `You have ${filteredAddresses.reduce((sum, a) => sum + (a.quantity || 1), 0)} pages from ${filteredAddresses.length} addresses ready to be exported.`
                   : 'Import some addresses first to generate your PDF.'}
               </p>
               
               <div className="flex flex-col gap-3">
                 <button 
                   onClick={handlePreview}
-                  disabled={addresses.length === 0 || !selectedMonth}
+                  disabled={filteredAddresses.length === 0 || !selectedMonth || !countryFilter}
                   className="w-full bg-blue-500/30 hover:bg-blue-500/50 text-white font-bold py-3 rounded-lg transition-colors flex justify-center items-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed border border-blue-400/50"
                 >
                   <Eye className="w-5 h-5" />
@@ -841,7 +884,7 @@ export default function App() {
                 </button>
                 <button 
                   onClick={generatePDF}
-                  disabled={addresses.length === 0 || !selectedMonth}
+                  disabled={filteredAddresses.length === 0 || !selectedMonth || !countryFilter}
                   className="w-full bg-white text-blue-700 hover:bg-gray-50 font-bold py-3 rounded-lg transition-colors flex justify-center items-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Download className="w-5 h-5" />
@@ -868,15 +911,21 @@ export default function App() {
                     <p className="text-lg font-medium text-gray-500">No addresses loaded</p>
                     <p className="text-sm mt-1">Fetch from the URL or upload a CSV to see the preview here.</p>
                   </div>
-                ) : !selectedMonth ? (
+                ) : (!selectedMonth || !countryFilter) ? (
                   <div className="h-full min-h-[400px] flex flex-col items-center justify-center text-gray-400 p-8 text-center bg-gray-50/50">
                     <Settings className="w-16 h-16 mb-4 opacity-20 text-purple-500" />
-                    <p className="text-lg font-medium text-purple-600">Snail Mail Month Required</p>
-                    <p className="text-sm mt-1 max-w-sm mx-auto">Please select a Snail Mail Month under PDF Settings on the left to preview and generate PDFs.</p>
+                    <p className="text-lg font-medium text-purple-600">Required Settings Missing</p>
+                    <p className="text-sm mt-1 max-w-sm mx-auto">Please select a Snail Mail Month and Shipping Region under PDF Settings on the left to preview and generate PDFs.</p>
+                  </div>
+                ) : filteredAddresses.length === 0 ? (
+                  <div className="h-full min-h-[400px] flex flex-col items-center justify-center text-gray-400 p-8 text-center">
+                    <FileText className="w-16 h-16 mb-4 opacity-20" />
+                    <p className="text-lg font-medium text-gray-500">No matching addresses</p>
+                    <p className="text-sm mt-1">No addresses match the selected shipping region filter.</p>
                   </div>
                 ) : (
                   <ul className="divide-y divide-gray-100">
-                    {addresses.map((addr, index) => {
+                    {filteredAddresses.map((addr, index) => {
                       let displayLines = '';
                       const isTaylorMay = addr.product && addr.product.toLowerCase().replace(/['\u2018\u2019]/g, "'").includes("mail club (taylor's version) - may");
                       const hasBirthdayMonthStar = selectedMonth && addr.birthdayMonth && matchMonth(addr.birthdayMonth, selectedMonth);
@@ -945,7 +994,7 @@ export default function App() {
             <div className="flex justify-between items-center p-4 border-b border-gray-100 bg-gray-50">
               <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
                 <Eye className="w-5 h-5 text-purple-600" />
-                PDF Preview {previewImages.length > 0 && <span className="text-sm font-normal text-gray-500 ml-2">(Showing {previewImages.length} of {addresses.reduce((sum, a) => sum + (a.quantity || 1), 0)} pages)</span>}
+                PDF Preview {previewImages.length > 0 && <span className="text-sm font-normal text-gray-500 ml-2">(Showing {previewImages.length} of {filteredAddresses.reduce((sum, a) => sum + (a.quantity || 1), 0)} pages)</span>}
               </h3>
               <button
                 onClick={() => {
