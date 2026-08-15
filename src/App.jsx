@@ -111,17 +111,32 @@ const formatAddressStr = (str, preserveState = false) => {
 const matchMonth = (birthdayMonthStr, targetMonthStr) => {
   if (!birthdayMonthStr || !targetMonthStr) return false;
   const normalizedBday = birthdayMonthStr.toLowerCase().replace(/['\u2018\u2019]/g, "'");
-  const normalizedTarget = targetMonthStr.toLowerCase();
+  const normalizedTarget = targetMonthStr.toLowerCase().trim();
+  if (!normalizedTarget) return false;
   
   if (normalizedBday.includes(normalizedTarget)) {
     return true;
   }
   
   const shortTarget = normalizedTarget.substring(0, 3);
-  if (shortTarget.length === 3 && normalizedBday.includes(shortTarget)) {
-    return true;
+  if (shortTarget.length === 3) {
+    const regexShort = new RegExp(`\\b${shortTarget}\\b`, 'i');
+    if (regexShort.test(normalizedBday)) {
+      return true;
+    }
   }
   
+  return false;
+};
+
+const hasBirthdayMatch = (addr, targetMonthStr) => {
+  if (!addr || !targetMonthStr) return false;
+  if (addr.birthdayMonth && matchMonth(addr.birthdayMonth, targetMonthStr)) {
+    return true;
+  }
+  if (addr.product && matchMonth(addr.product, targetMonthStr)) {
+    return true;
+  }
   return false;
 };
 
@@ -233,23 +248,37 @@ export default function App() {
             const row = data[i];
             
             const getCol = (possibleNames) => {
-              // Primary: header contains the keyword
-              let idx = headerRow.findIndex(h => possibleNames.some(pn => h === pn || (h.length >= 3 && h.includes(pn))));
-              // Secondary fallback: keyword contains the header (for short/truncated headers)
-              if (idx === -1) {
-                idx = headerRow.findIndex(h => h.length >= 3 && possibleNames.some(pn => pn.includes(h)));
+              // 1. Exact match in order of candidate priority
+              for (const name of possibleNames) {
+                const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+                const idx = headerRow.findIndex(h => h === cleanName);
+                if (idx !== -1 && row[idx] != null && String(row[idx]).trim() !== '') {
+                  return String(row[idx]).trim();
+                }
               }
-              return idx !== -1 && row[idx] != null ? String(row[idx]).trim() : '';
+              // 2. Substring match in order of candidate priority
+              for (const name of possibleNames) {
+                const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+                if (cleanName.length < 3) continue;
+                const idx = headerRow.findIndex(h => {
+                  if (!cleanName.includes('id') && h.endsWith('id')) return false;
+                  return h.includes(cleanName);
+                });
+                if (idx !== -1 && row[idx] != null && String(row[idx]).trim() !== '') {
+                  return String(row[idx]).trim();
+                }
+              }
+              return '';
             };
 
             const firstName = getCol(['shippingfirstname', 'firstname', 'first']);
             const lastName = getCol(['shippinglastname', 'lastname', 'last']);
             const name = firstName || lastName ? `${firstName} ${lastName}`.trim() : getCol(['shippingname', 'name', 'fullname', 'contact']);
             
-            const addr2 = getCol(['apartment', 'shippingaddress2', 'address2', 'suite', 'apt']);
-            const addr1 = getCol(['main', 'shippingaddress1', 'shippingaddress', 'address1', 'address', 'street']);
+            const addr2 = getCol(['shippingaddress2', 'apartment', 'address2', 'suite', 'apt']);
+            const addr1 = getCol(['shippingaddress1', 'shippingaddress', 'main', 'address1', 'address', 'street']);
             const city = getCol(['shippingcity', 'city']);
-            const prov = getCol(['stateshortform', 'shippingprovince', 'shippingstate', 'province', 'state']);
+            const prov = getCol(['shippingprovince', 'shippingstate', 'stateshortform', 'province', 'state']);
             let zip = getCol(['shippingzip', 'shippingzipcode', 'shippingpostalcode', 'zipcode', 'postalcode', 'zip', 'postal']);
             
             // Fallback: if zip wasn't found via column headers, scan the row for zipcode-pattern values
@@ -258,10 +287,10 @@ export default function App() {
               // Track which columns are already mapped
               ['shippingfirstname', 'firstname', 'first'].forEach(pn => { const i = headerRow.findIndex(h => h === pn || (h.length >= 3 && h.includes(pn))); if (i !== -1) usedIndices.add(i); });
               ['shippinglastname', 'lastname', 'last'].forEach(pn => { const i = headerRow.findIndex(h => h === pn || (h.length >= 3 && h.includes(pn))); if (i !== -1) usedIndices.add(i); });
-              ['apartment', 'shippingaddress2', 'address2', 'suite', 'apt'].forEach(pn => { const i = headerRow.findIndex(h => h === pn || (h.length >= 3 && h.includes(pn))); if (i !== -1) usedIndices.add(i); });
-              ['main', 'shippingaddress1', 'shippingaddress', 'address1', 'address', 'street'].forEach(pn => { const i = headerRow.findIndex(h => h === pn || (h.length >= 3 && h.includes(pn))); if (i !== -1) usedIndices.add(i); });
+              ['shippingaddress2', 'apartment', 'address2', 'suite', 'apt'].forEach(pn => { const i = headerRow.findIndex(h => h === pn || (h.length >= 3 && h.includes(pn))); if (i !== -1) usedIndices.add(i); });
+              ['shippingaddress1', 'shippingaddress', 'main', 'address1', 'address', 'street'].forEach(pn => { const i = headerRow.findIndex(h => h === pn || (h.length >= 3 && h.includes(pn))); if (i !== -1) usedIndices.add(i); });
               ['shippingcity', 'city'].forEach(pn => { const i = headerRow.findIndex(h => h === pn || (h.length >= 3 && h.includes(pn))); if (i !== -1) usedIndices.add(i); });
-              ['stateshortform', 'shippingprovince', 'shippingstate', 'province', 'state'].forEach(pn => { const i = headerRow.findIndex(h => h === pn || (h.length >= 3 && h.includes(pn))); if (i !== -1) usedIndices.add(i); });
+              ['shippingprovince', 'shippingstate', 'stateshortform', 'province', 'state'].forEach(pn => { const i = headerRow.findIndex(h => h === pn || (h.length >= 3 && h.includes(pn))); if (i !== -1) usedIndices.add(i); });
               
               const zipPattern = /^\d{5}(-\d{4})?$|^[A-Za-z]\d[A-Za-z]\s?\d[A-Za-z]\d$/;
               for (let j = 0; j < row.length; j++) {
@@ -275,7 +304,7 @@ export default function App() {
               }
             }
             
-            const product = getCol(['product', 'item', 'lineitem', 'variant', 'title']);
+            const product = getCol(['productname', 'itemname', 'lineitemname', 'product', 'item', 'lineitem', 'variant', 'title']);
             const birthdayMonth = getCol(['birthdaymonth', 'birthday', 'month']);
             const quantityStr = getCol(['quantity', 'qty']);
             const quantity = Math.max(1, parseInt(quantityStr, 10) || 1);
@@ -486,21 +515,10 @@ export default function App() {
 
         let nameLine = '';
         let restLines = [];
-        let isTaylorMay = false;
-        let hasBirthdayMonthStar = false;
+        const hasBirthdayMonthStar = hasBirthdayMatch(address, selectedMonth);
         
         if (address.isStructured) {
             nameLine = address.name;
-            
-            // Check for the specific product to add the star
-            if (address.product && address.product.toLowerCase().replace(/['\u2018\u2019]/g, "'").includes("mail club (taylor's version) - may")) {
-                isTaylorMay = true;
-            }
-            
-            // Check if selected snail mail month matches birthday month
-            if (selectedMonth && address.birthdayMonth && matchMonth(address.birthdayMonth, selectedMonth)) {
-                hasBirthdayMonthStar = true;
-            }
 
             // 1st Line (Under Name): Apartment
             if (address.addr2) restLines.push(formatAddressStr(address.addr2));
@@ -583,7 +601,7 @@ export default function App() {
         let currentY = (pageHeight / 2) - (totalHeight / 2) + verticalShiftMm;
 
         // Draw Star independently above the text block so the address never moves
-        if (isTaylorMay || hasBirthdayMonthStar) {
+        if (hasBirthdayMonthStar) {
             const points = 5;
             const outerRadius = 2.54; // 0.1 inch (total height ~0.2 inch)
             const innerRadius = 1.0;
@@ -951,9 +969,8 @@ export default function App() {
                   <ul className="divide-y divide-gray-100">
                     {filteredAddresses.map((addr, index) => {
                       let displayLines = '';
-                      const isTaylorMay = addr.product && addr.product.toLowerCase().replace(/['\u2018\u2019]/g, "'").includes("mail club (taylor's version) - may");
-                      const hasBirthdayMonthStar = selectedMonth && addr.birthdayMonth && matchMonth(addr.birthdayMonth, selectedMonth);
-                      const prefix = (isTaylorMay || hasBirthdayMonthStar) ? "★ " : "";
+                      const hasBirthdayMonthStar = hasBirthdayMatch(addr, selectedMonth);
+                      const prefix = hasBirthdayMonthStar ? "★ " : "";
 
                       if (addr.isStructured) {
                         const city = formatAddressStr(addr.city);
