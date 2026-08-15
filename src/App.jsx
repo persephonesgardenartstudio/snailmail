@@ -280,13 +280,14 @@ export default function App() {
             const quantityStr = getCol(['quantity', 'qty']);
             const quantity = Math.max(1, parseInt(quantityStr, 10) || 1);
             const country = getCol(['shippingcountry', 'country']);
+            const orderDate = getCol(['orderplaceddate', 'orderdate', 'placeddate', 'date']);
             const colA = row[0] != null ? String(row[0]).trim() : '';
             
             if (name || addr1 || city || zip) {
               if (!zip) {
                 console.warn(`Row ${i}: No zipcode found for "${name}". Raw row data:`, row);
               }
-              extractedAddresses.push({ name, addr1, addr2, city, prov, zip, product, birthdayMonth, colA, quantity, country, isStructured: true });
+              extractedAddresses.push({ name, addr1, addr2, city, prov, zip, product, birthdayMonth, colA, quantity, country, orderDate, isStructured: true });
             }
           }
         } else {
@@ -375,17 +376,26 @@ export default function App() {
     setAddresses(newAddresses);
   };
 
-  // Compute filtered addresses based on country filter
+  // Compute filtered addresses based on country filter, sorted oldest-first with serial numbers
   const filteredAddresses = React.useMemo(() => {
-    if (!countryFilter) return addresses;
+    let result = addresses;
     if (countryFilter === 'us') {
-      return addresses.filter(a => {
+      result = addresses.filter(a => {
         if (!a.isStructured) return true;
         const c = (a.country || '').toLowerCase().trim();
         return c === 'united states' || c === 'us' || c === 'usa' || c === 'united states of america';
       });
+    } else if (!countryFilter) {
+      result = addresses;
     }
-    return addresses; // 'all' returns everything
+    // Sort by order placed date: oldest first
+    result = [...result].sort((a, b) => {
+      const dateA = a.orderDate ? new Date(a.orderDate).getTime() : 0;
+      const dateB = b.orderDate ? new Date(b.orderDate).getTime() : 0;
+      return dateA - dateB;
+    });
+    // Assign serial numbers (1-based)
+    return result.map((addr, idx) => ({ ...addr, serialNumber: idx + 1 }));
   }, [addresses, countryFilter]);
 
   const buildPDF = () => {
@@ -443,12 +453,12 @@ export default function App() {
 
         const ptToMm = 0.352778; 
 
-        // Draw Column A value (Top Right Corner, 0.5" from edges)
-        if (address.colA) {
+        // Draw Serial Number (Top Right Corner, 0.5" from edges)
+        if (address.serialNumber) {
           doc.setFont('Alice', 'normal');
           doc.setFontSize(14);
           // 0.5 inches = 12.7 mm
-          doc.text(address.colA, doc.internal.pageSize.getWidth() - 12.7, 12.7, { align: 'right', baseline: 'top' });
+          doc.text(String(address.serialNumber), doc.internal.pageSize.getWidth() - 12.7, 12.7, { align: 'right', baseline: 'top' });
         }
 
         // Draw Return Address
