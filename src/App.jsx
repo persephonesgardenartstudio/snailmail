@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Download, Link as LinkIcon, Upload, Trash2, AlertCircle, CheckCircle2, FileUp, Settings, Eye, X, Loader2 } from 'lucide-react';
+import { FileText, Download, Upload, Trash2, AlertCircle, CheckCircle2, FileUp, Settings, Eye, X, Loader2 } from 'lucide-react';
 
 // Deploy trigger: 2026-07-04T23:57:00-07:00
 
@@ -143,14 +143,14 @@ const hasBirthdayMatch = (addr, targetMonthStr) => {
 export default function App() {
   console.log("App version: 2026-07-04T23:57:00-07:00");
   const [scriptsLoaded, setScriptsLoaded] = useState(false);
-  const [url, setUrl] = useState('');
+
   const [addresses, setAddresses] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   
   // PDF Settings
-  const [pageSize, setPageSize] = useState('letter');
+  const [pageSize, setPageSize] = useState('5x7-landscape');
   const [align, setAlign] = useState('center');
   const [selectedMonth, setSelectedMonth] = useState('');
   const [countryFilter, setCountryFilter] = useState('');
@@ -195,16 +195,7 @@ export default function App() {
     initScripts();
   }, []);
 
-  const extractSheetDetails = (sheetUrl) => {
-    const idMatch = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
-    const gidMatch = sheetUrl.match(/[?&]gid=([0-9]+)/);
-    
-    if (!idMatch) return null;
-    return {
-      id: idMatch[1],
-      gid: gidMatch ? gidMatch[1] : '0'
-    };
-  };
+
 
   const processCSVData = (csvText) => {
     // Treat the data as a raw 2D array to prevent "missing header" bugs
@@ -344,41 +335,6 @@ export default function App() {
     });
   };
 
-  const handleFetchUrl = async () => {
-    setError('');
-    setSuccess('');
-
-    if (!url.trim()) {
-      setError('Google Sheet URL is required. Please paste a URL above.');
-      return;
-    }
-
-    setLoading(true);
-
-    const details = extractSheetDetails(url);
-    if (!details) {
-      setError('Invalid Google Sheets URL. Please ensure it contains "/d/[sheet-id]".');
-      setLoading(false);
-      return;
-    }
-
-    const exportUrl = `https://docs.google.com/spreadsheets/d/${details.id}/gviz/tq?tqx=out:csv&gid=${details.gid}`;
-
-    try {
-      const response = await fetch(exportUrl);
-      if (!response.ok) throw new Error('Network response was not ok');
-      const csvText = await response.text();
-      
-      if (csvText.trim().toLowerCase().startsWith('<!doctype html>')) {
-         throw new Error('Unauthorized');
-      }
-      
-      processCSVData(csvText);
-    } catch (err) {
-      setError('Could not access the spreadsheet. Please ensure "General access" is set to "Anyone with the link". Alternatively, download it as a CSV and upload it below.');
-      setLoading(false);
-    }
-  };
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
@@ -730,7 +686,9 @@ export default function App() {
     }
     const doc = buildPDF();
     if (doc) {
-      doc.save('Customer_Addresses.pdf');
+      const now = new Date();
+      const timestamp = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}-${String(now.getMinutes()).padStart(2,'0')}`;
+      doc.save(`Customer_Addresses_${timestamp}.pdf`);
       setSuccess('PDF generated and downloaded successfully!');
     }
   };
@@ -749,7 +707,7 @@ export default function App() {
         
         <div className="text-center space-y-2">
           <h1 className="text-3xl md:text-4xl font-bold text-gray-900 tracking-tight">Address PDF Generator</h1>
-          <p className="text-gray-500">Import your Google Sheet and create a 1-address-per-page PDF instantly.</p>
+          <p className="text-gray-500">Upload your CSV and create a 1-address-per-page PDF instantly.</p>
         </div>
 
         {error && (
@@ -771,48 +729,19 @@ export default function App() {
             
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                <LinkIcon className="w-5 h-5 text-blue-500" />
+                <FileUp className="w-5 h-5 text-blue-500" />
                 Import Data
               </h2>
               
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Google Sheet URL <span className="text-red-500">*</span></label>
-                  <input 
-                    type="text" 
-                    value={url}
-                    onChange={(e) => setUrl(e.target.value)}
-                    required
-                    className="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
-                    placeholder="https://docs.google.com/spreadsheets/d/..."
-                  />
-                  <p className="text-xs text-gray-400 mt-1">Sheet must be set to "Anyone with the link can view".</p>
-                </div>
-                
-                <button 
-                  onClick={handleFetchUrl}
-                  disabled={loading}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg transition-colors flex justify-center items-center gap-2 disabled:opacity-50"
-                >
-                  {loading ? 'Importing...' : 'Fetch Addresses'}
-                </button>
-
-                <div className="relative py-2">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-gray-200"></div>
-                  </div>
-                  <div className="relative flex justify-center text-sm">
-                    <span className="px-2 bg-white text-gray-500">OR</span>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Upload CSV Backup</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Upload CSV File</label>
                   <label className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-gray-300 text-gray-600 hover:bg-gray-50 hover:border-blue-400 rounded-lg p-3 cursor-pointer transition-all">
                     <FileUp className="w-5 h-5" />
                     <span className="text-sm font-medium">Browse CSV file</span>
                     <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
                   </label>
+                  <p className="text-xs text-gray-400 mt-1">Download your Google Sheet as CSV (File → Download → CSV) and upload it here.</p>
                 </div>
               </div>
             </div>
@@ -951,7 +880,7 @@ export default function App() {
                   <div className="h-full min-h-[400px] flex flex-col items-center justify-center text-gray-400 p-8 text-center">
                     <FileText className="w-16 h-16 mb-4 opacity-20" />
                     <p className="text-lg font-medium text-gray-500">No addresses loaded</p>
-                    <p className="text-sm mt-1">Fetch from the URL or upload a CSV to see the preview here.</p>
+                    <p className="text-sm mt-1">Upload a CSV to see the preview here.</p>
                   </div>
                 ) : (!selectedMonth || !countryFilter) ? (
                   <div className="h-full min-h-[400px] flex flex-col items-center justify-center text-gray-400 p-8 text-center bg-gray-50/50">
