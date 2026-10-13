@@ -1,22 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { loadScript, ensurePdfJs } from './loadScript';
+import LetterPersonalizer from './LetterPersonalizer';
 import { FileText, Download, Upload, Trash2, AlertCircle, CheckCircle2, FileUp, Settings, Eye, X, Loader2 } from 'lucide-react';
 
 // Deploy trigger: 2026-07-04T23:57:00-07:00
-
-// Utility to load external scripts dynamically
-const loadScript = (src) => {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector(`script[src="${src}"]`)) {
-      resolve();
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = src;
-    script.onload = resolve;
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-};
 
 const stateMap = {
   'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR', 'california': 'CA',
@@ -307,7 +294,7 @@ export default function App() {
               if (!zip) {
                 console.warn(`Row ${i}: No zipcode found for "${name}". Raw row data:`, row);
               }
-              extractedAddresses.push({ name, addr1, addr2, city, prov, zip, product, birthdayMonth, colA, quantity, country, orderDate, isStructured: true });
+              extractedAddresses.push({ name, firstName, addr1, addr2, city, prov, zip, product, birthdayMonth, colA, quantity, country, orderDate, isStructured: true });
             }
           }
         } else {
@@ -640,10 +627,7 @@ export default function App() {
       const doc = buildPDF();
       if (!doc) throw new Error("PDF generation failed");
 
-      if (!window.pdfjsLib) {
-        await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-      }
+      await ensurePdfJs();
 
       const pdfData = doc.output('arraybuffer');
       const pdf = await window.pdfjsLib.getDocument({ data: pdfData }).promise;
@@ -956,6 +940,8 @@ export default function App() {
           </div>
 
         </div>
+
+        <LetterPersonalizer subscribers={filteredAddresses} />
       </div>
 
       {showPreview && (
