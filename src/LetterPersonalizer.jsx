@@ -53,10 +53,12 @@ const getImageBox = (page, image) => {
 };
 
 const defaultGreeting = (page) => ({ x: 72, y: page.height - 108, fontSize: 24 });
+// Letter number defaults to the top-right corner
+const defaultNumber = (page) => ({ x: page.width - 90, y: page.height - 60 });
 
 // Small random tilt and shift per letter so the greetings look hand-written.
 // Derived from a seed so the preview matches the download exactly.
-const MAX_TILT_DEGREES = 5;
+const MAX_TILT_DEGREES = 3;
 const MAX_SHIFT_X = 5; // points
 const MAX_SHIFT_Y = 3; // points, kept smaller so the name doesn't drift into the body text
 
@@ -75,6 +77,9 @@ const getJitter = (seed, index) => {
 };
 
 const NO_JITTER = { angle: 0, dx: 0, dy: 0 };
+
+// Separate stream for the number so it doesn't tilt in lockstep with the greeting
+const NUMBER_SEED_SALT = 0x5BD1E995;
 
 const loadImage = (url) => new Promise((resolve, reject) => {
   const img = new Image();
@@ -101,25 +106,36 @@ export default function LetterPersonalizer({ subscribers }) {
   const [error, setError] = useState('');
   const [varyGreeting, setVaryGreeting] = useState(true);
   const [jitterSeed, setJitterSeed] = useState(newSeed);
+  const [showNumber, setShowNumber] = useState(true);
+  const [numberSize, setNumberSize] = useState(24);
+  // Same fractional coordinates as the greeting position
+  const [numberPosition, setNumberPosition] = useState(null);
   const imgRef = useRef(null);
+  // Text extents on the preview (page points), used to tell whether a drag grabbed the greeting or the number
+  const textWidthsRef = useRef({ greeting: 0, number: 0 });
+  const dragRef = useRef(null);
 
   const recipients = subscribers
     .map(s => ({ subscriber: s, firstName: getFirstName(s), fullName: getFullName(s) }))
     .filter(r => r.firstName);
+  // Matches the serial number printed on that subscriber's envelope
+  const letterNumber = (index) => String(recipients[index]?.subscriber.serialNumber || index + 1);
   const skipped = subscribers.length - recipients.length;
   const previewRecipient = recipients[Math.min(previewIndex, recipients.length - 1)];
   const previewName = previewRecipient ? previewRecipient.firstName : 'Megan';
   const previewRecipientIndex = Math.max(0, Math.min(previewIndex, recipients.length - 1));
   const jitterFor = (index) => (varyGreeting ? getJitter(jitterSeed, index) : NO_JITTER);
+  const numberJitterFor = (index) => (varyGreeting ? getJitter((jitterSeed ^ NUMBER_SEED_SALT) >>> 0, index) : NO_JITTER);
 
   const page = letter ? getPageSize(pageSizeKey, letter) : null;
   const box = letter ? getImageBox(page, letter) : null;
 
   // Greeting baseline in PDF points from the bottom-left of the page
-  const greetingPoint = () => ({
-    x: box.x + position.fx * box.width,
-    y: box.y + box.height - position.fy * box.height,
+  const toPagePoint = (pos) => ({
+    x: box.x + pos.fx * box.width,
+    y: box.y + box.height - pos.fy * box.height,
   });
+  const greetingPoint = () => toPagePoint(position);
 
   const getFontBytes = useCallback(async (key) => {
     if (fontCache[key]) return fontCache[key];
@@ -130,10 +146,10 @@ export default function LetterPersonalizer({ subscribers }) {
     return bytes;
   }, [fontCache]);
 
-  const getDefaultPosition = (img) => {
+  const getDefaultPosition = (img, defaults = defaultGreeting) => {
     const p = getPageSize(pageSizeKey, img);
     const b = getImageBox(p, img);
-    const d = defaultGreeting(p);
+    const d = defaults(p);
     return {
       fx: Math.min(Math.max((d.x - b.x) / b.width, 0), 1),
       fy: Math.min(Math.max((b.y + b.height - d.y) / b.height, 0), 1),
@@ -161,7 +177,9 @@ export default function LetterPersonalizer({ subscribers }) {
       setLetter(next);
       setLetterName(file.name);
       setPosition(getDefaultPosition(next));
+      setNumberPosition(getDefaultPosition(next, defaultNumber));
       setFontSize(24);
+      setNumberSize(24);
       setJitterSeed(newSeed());
     } catch (err) {
       console.error(err);
@@ -171,7 +189,7 @@ export default function LetterPersonalizer({ subscribers }) {
 
   // Re-render the preview whenever the letter, name, font, size, paper or position changes
   useEffect(() => {
-    if (!letter || !position) return;
+    if (!letter || !position || !numberPosition) return;
     let cancelled = false;
     const render = async () => {
       setPreviewLoading(true);
@@ -200,7 +218,19 @@ export default function LetterPersonalizer({ subscribers }) {
         ctx.translate((x + jitter.dx) * k, (page.height - y - jitter.dy) * k);
         ctx.rotate(-jitter.angle * Math.PI / 180);
         ctx.fillText(`Dear ${previewName},`, 0, 0);
+        textWidthsRef.current.greeting = ctx.measureText(`Dear ${previewName},`).width / k;
         ctx.restore();
+        if (showNumber) {
+          const n = toPagePoint(numberPosition);
+          const nj = numberJitterFor(previewRecipientIndex);
+          ctx.font = `${numberSize * k}px "${family}"`;
+          ctx.save();
+          ctx.translate((n.x + nj.dx) * k, (page.height - n.y - nj.dy) * k);
+          ctx.rotate(-nj.angle * Math.PI / 180);
+          ctx.fillText(letterNumber(previewRecipientIndex), 0, 0);
+          textWidthsRef.current.number = ctx.measureText(letterNumber(previewRecipientIndex)).width / k;
+          ctx.restore();
+        }
         if (!cancelled) setPreviewSrc(canvas.toDataURL('image/jpeg', 0.85));
       } catch (err) {
         console.error(err);
@@ -212,18 +242,53 @@ export default function LetterPersonalizer({ subscribers }) {
     render();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [letter, position, fontKey, fontSize, previewName, previewRecipientIndex, pageSizeKey, varyGreeting, jitterSeed]);
+  }, [letter, position, fontKey, fontSize, previewName, previewRecipientIndex, pageSizeKey, varyGreeting, jitterSeed, showNumber, numberSize, numberPosition, subscribers]);
 
-  // Clicking the preview moves the start of the greeting to that spot
-  const handlePreviewClick = (e) => {
-    const img = imgRef.current;
-    if (!img || !box) return;
-    const rect = img.getBoundingClientRect();
+  // Pointer position on the preview, as a fraction of the letter image (same units as position)
+  const pointerToFraction = (e) => {
+    const rect = imgRef.current.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width * page.width;
     const yFromTop = (e.clientY - rect.top) / rect.height * page.height;
     const imageTop = page.height - box.y - box.height;
-    setPosition({ fx: (x - box.x) / box.width, fy: (yFromTop - imageTop) / box.height });
+    return { fx: (x - box.x) / box.width, fy: (yFromTop - imageTop) / box.height };
   };
+
+  // Is the pointer over this text? pos is its baseline start, in fractions of the image
+  const isOver = (pointer, pos, width, size) => {
+    const pad = 8; // points of slack around the text
+    const px = (pointer.fx - pos.fx) * box.width;
+    const py = (pointer.fy - pos.fy) * box.height; // positive = below the baseline
+    return px >= -pad && px <= width + pad && py >= -size - pad && py <= size * 0.4 + pad;
+  };
+
+  // Drag the greeting or the number to move it. Clicking anywhere else moves the greeting there.
+  const handlePointerDown = (e) => {
+    if (!imgRef.current || !box) return;
+    e.preventDefault();
+    const pointer = pointerToFraction(e);
+    const widths = textWidthsRef.current;
+    let target = null;
+    if (showNumber && isOver(pointer, numberPosition, widths.number, numberSize)) target = 'number';
+    else if (isOver(pointer, position, widths.greeting, fontSize)) target = 'greeting';
+    if (target) {
+      const start = target === 'number' ? numberPosition : position;
+      dragRef.current = { target, offset: { fx: start.fx - pointer.fx, fy: start.fy - pointer.fy } };
+    } else {
+      dragRef.current = { target: 'greeting', offset: { fx: 0, fy: 0 } };
+      setPosition(pointer);
+    }
+    imgRef.current.setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const pointer = pointerToFraction(e);
+    const next = { fx: pointer.fx + drag.offset.fx, fy: pointer.fy + drag.offset.fy };
+    (drag.target === 'number' ? setNumberPosition : setPosition)(next);
+  };
+
+  const handlePointerUp = () => { dragRef.current = null; };
 
   const handleGenerate = async () => {
     if (!letter || recipients.length === 0) return;
@@ -238,6 +303,7 @@ export default function LetterPersonalizer({ subscribers }) {
       // Embedded once and reused on every page, at full resolution
       const image = letter.type === 'png' ? await doc.embedPng(letter.bytes) : await doc.embedJpg(letter.bytes);
       const { x, y } = greetingPoint();
+      const n = toPagePoint(numberPosition);
       for (let i = 0; i < recipients.length; i++) {
         setProgress(`Adding letter ${i + 1} of ${recipients.length}...`);
         const pdfPage = doc.addPage([page.width, page.height]);
@@ -251,6 +317,17 @@ export default function LetterPersonalizer({ subscribers }) {
           font,
           color: rgb(0.08, 0.08, 0.12),
         });
+        if (showNumber) {
+          const nj = numberJitterFor(i);
+          pdfPage.drawText(letterNumber(i), {
+            x: n.x + nj.dx,
+            y: n.y + nj.dy,
+            rotate: degrees(nj.angle),
+            size: numberSize,
+            font,
+            color: rgb(0.08, 0.08, 0.12),
+          });
+        }
       }
       setProgress('Saving PDF...');
       const blob = new Blob([await doc.save()], { type: 'application/pdf' });
@@ -275,7 +352,9 @@ export default function LetterPersonalizer({ subscribers }) {
   };
 
   // Nudge by 3 points on the printed page
-  const nudge = (dx, dy) => setPosition(p => ({ fx: p.fx + dx / box.width, fy: p.fy - dy / box.height }));
+  const nudgeWith = (setter) => (dx, dy) => setter(p => ({ fx: p.fx + dx / box.width, fy: p.fy - dy / box.height }));
+  const nudge = nudgeWith(setPosition);
+  const nudgeNumber = nudgeWith(setNumberPosition);
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -367,9 +446,63 @@ export default function LetterPersonalizer({ subscribers }) {
                 </div>
                 <p className="text-xs text-gray-400 flex-1 flex gap-1">
                   <MousePointerClick className="w-4 h-4 flex-shrink-0" />
-                  Or click on the preview where the greeting should start.
+                  Or drag the greeting on the preview, or click where it should start.
                 </p>
               </div>
+            </div>
+          )}
+
+          {numberPosition && (
+            <div>
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={showNumber}
+                  onChange={(e) => setShowNumber(e.target.checked)}
+                  className="accent-rose-500 w-4 h-4"
+                />
+                Letter Number
+              </label>
+              <p className="text-xs text-gray-400 mt-1">
+                Numbers each letter 1, 2, 3… matching the envelope numbers, in the same handwriting as the greeting.
+              </p>
+              {showNumber && (
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Number Size: {numberSize}pt</label>
+                    <input
+                      type="range" min="12" max="72" value={numberSize}
+                      onChange={(e) => setNumberSize(Number(e.target.value))}
+                      className="w-full accent-rose-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Number Position</label>
+                    <div className="flex items-center gap-2">
+                      <div className="grid grid-cols-3 gap-1 w-28">
+                        <span />
+                        <button onClick={() => nudgeNumber(0, 3)} className="border border-gray-300 rounded py-1 text-sm hover:bg-gray-50" title="Move up">↑</button>
+                        <span />
+                        <button onClick={() => nudgeNumber(-3, 0)} className="border border-gray-300 rounded py-1 text-sm hover:bg-gray-50" title="Move left">←</button>
+                        <button
+                          onClick={() => { setNumberPosition(getDefaultPosition(letter, defaultNumber)); setNumberSize(24); }}
+                          className="border border-gray-300 rounded py-1 flex justify-center hover:bg-gray-50" title="Reset position"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => nudgeNumber(3, 0)} className="border border-gray-300 rounded py-1 text-sm hover:bg-gray-50" title="Move right">→</button>
+                        <span />
+                        <button onClick={() => nudgeNumber(0, -3)} className="border border-gray-300 rounded py-1 text-sm hover:bg-gray-50" title="Move down">↓</button>
+                        <span />
+                      </div>
+                      <p className="text-xs text-gray-400 flex-1 flex gap-1">
+                        <MousePointerClick className="w-4 h-4 flex-shrink-0" />
+                        Or drag the number on the preview.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -385,7 +518,7 @@ export default function LetterPersonalizer({ subscribers }) {
                 Natural variation
               </label>
               <p className="text-xs text-gray-400 mt-1">
-                Each name gets a slight random tilt (up to {MAX_TILT_DEGREES}°) and shift so no two look identical. It changes every time you upload a letter.
+                Each name{showNumber ? ' and number' : ''} gets a slight random tilt (up to {MAX_TILT_DEGREES}°) and shift so no two look identical. It changes every time you upload a letter.
               </p>
               {varyGreeting && (
                 <button
@@ -444,8 +577,12 @@ export default function LetterPersonalizer({ subscribers }) {
                   ref={imgRef}
                   src={previewSrc}
                   alt="Personalized letter preview"
-                  onClick={handlePreviewClick}
-                  className="max-w-full h-auto shadow-md bg-white border border-gray-300 cursor-crosshair"
+                  onPointerDown={handlePointerDown}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUp}
+                  onPointerCancel={handlePointerUp}
+                  draggable={false}
+                  className="max-w-full h-auto shadow-md bg-white border border-gray-300 cursor-crosshair touch-none select-none"
                 />
                 {previewLoading && <Loader2 className="w-6 h-6 animate-spin text-rose-500 absolute top-6 right-6" />}
               </>
